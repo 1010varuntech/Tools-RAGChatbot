@@ -213,7 +213,7 @@ class ToolUpdate(BaseModel):
 router = APIRouter()
 
 @router.post("/create_session/{user_id}/{session_id}")
-async def create_session(user_id: str, session_id: str):
+async def create_session(user_id: str, session_id: str, session: SessionContainer = Depends(verify_session())):
     existing_sessions = load_sessions(user_id)
     if any(session["session_id"] == session_id for session in existing_sessions):
         raise HTTPException(status_code=400, detail="Session already exists")
@@ -221,14 +221,14 @@ async def create_session(user_id: str, session_id: str):
     return {"message": "Session created", "user_id": user_id, "session_id": session_id}
 
 @router.get("/list_sessions/{user_id}")
-async def list_sessions(user_id: str):
+async def list_sessions(user_id: str, session: SessionContainer = Depends(verify_session())):
     sessions = load_sessions(user_id)
     if not sessions:
         raise HTTPException(status_code=404, detail="User not found")
     return {"sessions": [session["session_id"] for session in sessions]}
 
 @router.delete("/delete_session/{user_id}/{session_id}")
-async def delete_session_endpoint(user_id: str, session_id: str):
+async def delete_session_endpoint(user_id: str, session_id: str, session: SessionContainer = Depends(verify_session())):
     try:
         delete_session(user_id, session_id)
         return {"message": "Session deleted", "user_id": user_id, "session_id": session_id}
@@ -236,14 +236,14 @@ async def delete_session_endpoint(user_id: str, session_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/history/{user_id}/{session_id}")
-async def get_history(user_id: str, session_id: str):
+async def get_history(user_id: str, session_id: str, session: SessionContainer = Depends(verify_session())):
     history = load_history(user_id, session_id)
     if not history:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"user_id": user_id, "session_id": session_id, "history": history}
 
 @router.delete("/history/{user_id}/{session_id}")
-async def clear_history(user_id: str, session_id: str):
+async def clear_history(user_id: str, session_id: str, session: SessionContainer = Depends(verify_session())):
     try:
         save_history(user_id, session_id, [])
         return {"message": "Session history cleared", "user_id": user_id, "session_id": session_id}
@@ -300,7 +300,7 @@ async def ask_query(user_id: str, session_id: str, query: Query, namespace: str,
     return StreamingResponse(openai_response_stream(), media_type="text/event-stream")
 
 @app.get("/chats/user/{user_id}")
-async def get_user_chats(user_id: str):
+async def get_user_chats(user_id: str, session: SessionContainer = Depends(verify_session())):
     sessions = load_sessions(user_id)
     if not sessions:
         raise HTTPException(status_code=404, detail="User not found")
@@ -331,7 +331,7 @@ def convert_object_id(document):
     return document
 
 @app.post("/tools/get")
-async def get_tool(query: ToolQuery):
+async def get_tool(query: ToolQuery, session: SessionContainer = Depends(verify_session())):
     try:
         tool = load_tool(query.toolId)
         if not tool:
@@ -343,7 +343,7 @@ async def get_tool(query: ToolQuery):
 
 
 @app.post("/tools/create")
-async def add_tool(tool: Tool):
+async def add_tool(tool: Tool, session: SessionContainer = Depends(verify_session())):
     try:
         tool_data = tool.dict()
         tool_data["_id"] = ObjectId()
@@ -354,7 +354,7 @@ async def add_tool(tool: Tool):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/tools/update")
-async def update_tool(tool: ToolUpdate):
+async def update_tool(tool: ToolUpdate, session: SessionContainer = Depends(verify_session())):
     try:
         tool_data = tool.to_mongo()
         save_tool(tool_data)
@@ -364,7 +364,7 @@ async def update_tool(tool: ToolUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/tools/delete")
-async def delete_tool_endpoint(query: ToolQuery):
+async def delete_tool_endpoint(query: ToolQuery, session: SessionContainer = Depends(verify_session())):
     try:
         delete_tool(query.toolId)
         await clear_and_reload_vectordb(namespace="default")  # Clear and reload vector database with default namespace
@@ -373,7 +373,7 @@ async def delete_tool_endpoint(query: ToolQuery):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/tools")
-async def list_tools_endpoint():
+async def list_tools_endpoint(session: SessionContainer = Depends(verify_session())):
     try:
         tools = list_tools()
         tools = [convert_object_id(tool) for tool in tools]  # Convert ObjectId fields to strings
@@ -383,7 +383,7 @@ async def list_tools_endpoint():
 
 # Document management endpoints
 @app.get("/documents")
-async def get_documents():
+async def get_documents(session: SessionContainer = Depends(verify_session())):
     documents = list_tools()
     return [{"content": doc["page_content"], "metadata": doc["metadata"]} for doc in documents]
 
