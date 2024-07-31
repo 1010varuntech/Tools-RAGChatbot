@@ -164,6 +164,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Adding a root route for basic health check
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the Tools Assistant"}
+
+# Adding a health check endpoint
+@app.get("/healthz")
+async def health_check():
+    return {"status": "ok"}
+
 # Defining Pydantic models
 class Query(BaseModel):
     query: str
