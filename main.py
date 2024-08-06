@@ -201,20 +201,33 @@ class ToolUpdate(BaseModel):
 # Session management
 router = APIRouter()
 
-@router.post("/create_session/{user_id}/{session_id}")
-async def create_session(user_id: str, session_id: str):
-    existing_sessions = load_sessions(user_id)
-    if any(session["session_id"] == session_id for session in existing_sessions):
-        raise HTTPException(status_code=400, detail="Session already exists")
-    save_session(user_id, session_id, {"history": []})
+@router.post("/create_session/{user_id}")
+async def create_session(user_id: str):
+    session_id = str(uuid.uuid4())
+    save_session(user_id, session_id, {"history": []}, new_session=True)
     return {"message": "Session created", "user_id": user_id, "session_id": session_id}
 
+from utils import list_sessions
+from fastapi import Query as fApiQry
 @router.get("/list_sessions/{user_id}")
-async def list_sessions(user_id: str):
-    sessions = load_sessions(user_id)
+async def list_sessions_endpoint(
+    user_id: str,
+    page: int = fApiQry(1, description="Page number"),
+    limit: int = fApiQry(10, description="Number of items per page"),
+    sort_by: str = fApiQry("ascending", description="Sort order: 'ascending', 'descending', 'newest', 'oldest'")
+):
+    sessions = await list_sessions(user_id, page, limit, sort_by)
+    print("sessions", sessions)
     if not sessions:
-        raise HTTPException(status_code=404, detail="User not found")
-    return {"sessions": [session["session_id"] for session in sessions]}
+        raise HTTPException(status_code=404, detail="User not found or no sessions available")
+    return {"sessions": [
+        {
+            "session_id": session["session_id"],
+            "created_at": session["created_at"],
+            "updated_at": session["updated_at"],
+            "chat_name": session["chat_name"]
+        } for session in sessions
+    ]}# return all the sessions
 
 @router.delete("/delete_session/{user_id}/{session_id}")
 async def delete_session_endpoint(user_id: str, session_id: str):
@@ -223,13 +236,26 @@ async def delete_session_endpoint(user_id: str, session_id: str):
         return {"message": "Session deleted", "user_id": user_id, "session_id": session_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+def convert_objectid_to_str(data):
+    if isinstance(data, list):
+        return [convert_objectid_to_str(item) for item in data]
+    elif isinstance(data, dict):
+        return {key: convert_objectid_to_str(value) for key, value in data.items()}
+    elif isinstance(data, ObjectId):
+        return str(data)
+    else:
+        return data
+    
 
+from utils import load_session
 @router.get("/history/{user_id}/{session_id}")
 async def get_history(user_id: str, session_id: str):
-    history = load_history(user_id, session_id)
+    history = convert_objectid_to_str(load_session(user_id, session_id))
     if not history:
         raise HTTPException(status_code=404, detail="Session not found")
-    return {"user_id": user_id, "session_id": session_id, "history": history}
+    print("history", history)
+    return history
 
 @router.delete("/history/{user_id}/{session_id}")
 async def clear_history(user_id: str, session_id: str):
@@ -239,8 +265,14 @@ async def clear_history(user_id: str, session_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class userQuery(BaseModel):
+    query: str
+    source_filter: str = "all"
+    namespace: str
+
 @app.post("/query/{user_id}/{session_id}")
-async def ask_query(user_id: str, session_id: str, query: Query, namespace: str):
+async def ask_query(user_id: str, session_id: str, query: userQuery):
+    namespace = query.namespace
     existing_sessions = load_sessions(user_id)
     if not any(session["session_id"] == session_id for session in existing_sessions):
         raise HTTPException(status_code=404, detail="Session not found")
@@ -269,20 +301,19 @@ async def ask_query(user_id: str, session_id: str, query: Query, namespace: str)
 
     # Save to user-specific and session-specific history
     history = load_history(user_id, session_id)
-    history.append({
-        "chatName": query_text[:20],  # Extract the first 20 characters of the query for chatName
-        "metaData": {
-            "_userId": user_id
-        },
-        "messages": [
+    from utils import aiChatName
+    chatName = "oldChat"
+    if history == []:
+        chatName = aiChatName(query_text)
+    history.append([
             {
                 "humanReq": query_text,
                 "aiRes": formatted_answer,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now().isoformat()
             }
         ]
-    })
-    save_history(user_id, session_id, history)
+    )
+    save_history(user_id, session_id, history, chatName)
 
     return {"answer": formatted_answer}
 
@@ -305,6 +336,7 @@ async def get_user_chats(user_id: str):
 
 
 from bson import ObjectId
+import uuid
 
 def convert_object_id(document):
     if isinstance(document, list):
