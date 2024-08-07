@@ -368,7 +368,7 @@ async def add_tool(tool: Tool):
         tool_data["_id"] = ObjectId()
         save_tool(tool_data)
         await clear_and_reload_vectordb(namespace="default")  # Clear and reload vector database with default namespace
-        return {"message": "Tool created successfully"}
+        return {"message": "Tool created successfully", "toolId": str(tool_data["_id"])}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
