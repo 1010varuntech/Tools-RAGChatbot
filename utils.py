@@ -61,25 +61,6 @@ def load_history(user_id, session_id):
     session = load_session(user_id, session_id)
     return session.get("history", []) if session else []
 
-# def list_sessions(user_id: str, page: int, limit: int, sort_by: str):
-#     print("list_sessions", user_id, page, limit, sort_by)
-#     query = {"user_id": user_id}
-    
-#     if sort_by == "ascending":
-#         sort_order = [("session_id", ASCENDING)]
-#     elif sort_by == "descending":
-#         sort_order = [("session_id", DESCENDING)]
-#     elif sort_by == "newest":
-#         sort_order = [("$natural", DESCENDING)]  # Sort by natural order, which in absence of a timestamp approximates newest
-#     elif sort_by == "oldest":
-#         sort_order = [("$natural", ASCENDING)]  # Sort by natural order, which in absence of a timestamp approximates oldest
-#     else:
-#         sort_order = [("session_id", ASCENDING)]
-        
-#     cursor = db['sessions'].find().sort(sort_order).skip((page - 1) * limit).limit(limit)
-#     print("cursor", list(cursor))
-#     return list(cursor)
-
 from motor.motor_asyncio import AsyncIOMotorClient
 
 async def list_sessions(user_id: str, page: int, limit: int, sort_by: str):
