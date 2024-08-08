@@ -1,8 +1,6 @@
 import os
-from pydantic import Field
-from fastapi import FastAPI, HTTPException, APIRouter, Depends, Query, Body
 from pydantic import BaseModel
-import asyncio
+from fastapi import FastAPI, HTTPException, APIRouter, Query
 import httpx
 from utils import save_history, load_history, save_session, load_sessions, delete_session, list_tools, save_tool, load_tool, delete_tool
 from openai import OpenAI
@@ -175,6 +173,7 @@ class Tool(BaseModel):
     logo: str
     prompt: str
     userId: str
+    namespace: str  # Add namespace here
 
 class ToolQuery(BaseModel):
     toolId: str
@@ -187,6 +186,7 @@ class ToolUpdate(BaseModel):
     logo: str
     prompt: str
     userId: str
+    namespace: str  # Add namespace here
 
     def to_mongo(self):
         return {
@@ -196,6 +196,7 @@ class ToolUpdate(BaseModel):
             "logo": self.logo,
             "prompt": self.prompt,
             "userId": self.userId,
+            "namespace": self.namespace,  # Add namespace here
         }
 
 # Session management
@@ -265,14 +266,14 @@ async def clear_history(user_id: str, session_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-class userQuery(BaseModel):
+class UserQuery(BaseModel):
     query: str
     source_filter: str = "all"
-    namespace: str
+    url: str
 
 @app.post("/query/{user_id}/{session_id}")
-async def ask_query(user_id: str, session_id: str, query: userQuery):
-    namespace = query.namespace
+async def ask_query(user_id: str, session_id: str, query: UserQuery):
+    namespace = query.url  # using URL as namespace
     existing_sessions = load_sessions(user_id)
     if not any(session["session_id"] == session_id for session in existing_sessions):
         raise HTTPException(status_code=404, detail="Session not found")
@@ -367,8 +368,15 @@ async def add_tool(tool: Tool):
         tool_data = tool.dict()
         tool_data["_id"] = ObjectId()
         save_tool(tool_data)
-        await clear_and_reload_vectordb(namespace="default")  # Clear and reload vector database with default namespace
-        return {"message": "Tool created successfully", "toolId": str(tool_data["_id"])}
+
+        # Process and insert data into Pinecone
+        documents = [Document(page_content=tool.prompt, metadata={"source": tool.name})]
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        texts = text_splitter.split_documents(documents)
+        embedding = OpenAIEmbeddings(openai_api_key=openai_api_key)
+        vectordb = Pinecone.from_documents(documents=texts, embedding=embedding, index_name=pinecone_index_name, namespace=tool.namespace)
+
+        return {"message": "Tool created successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -377,7 +385,14 @@ async def update_tool(tool: ToolUpdate):
     try:
         tool_data = tool.to_mongo()
         save_tool(tool_data)
-        await clear_and_reload_vectordb(namespace="default")  # Clear and reload vector database with default namespace
+
+        # Process and insert data into Pinecone
+        documents = [Document(page_content=tool.prompt, metadata={"source": tool.name})]
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        texts = text_splitter.split_documents(documents)
+        embedding = OpenAIEmbeddings(openai_api_key=openai_api_key)
+        vectordb = Pinecone.from_documents(documents=texts, embedding=embedding, index_name=pinecone_index_name, namespace=tool.namespace)
+
         return {"message": "Tool updated successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
