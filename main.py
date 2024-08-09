@@ -271,6 +271,8 @@ class UserQuery(BaseModel):
     source_filter: str = "all"
     url: str
 
+from utils import generateSummary
+
 @app.post("/query/{user_id}/{session_id}")
 async def ask_query(user_id: str, session_id: str, query: UserQuery):
     namespace = query.url  # using URL as namespace
@@ -285,13 +287,37 @@ async def ask_query(user_id: str, session_id: str, query: UserQuery):
         retrieved_docs = retriever.get_relevant_documents(query_text, filters={"source": source_choice}, namespace=namespace)
     else:
         retrieved_docs = retriever.get_relevant_documents(query_text, namespace=namespace)
-
+    
+    print("retrieved_docs", retrieved_docs)
+    
+    # Extract the content from retrieved_docs
+    doc_contents = "\n\n".join([doc.page_content for doc in retrieved_docs])
+    
     # Modify the query text to instruct the model to use specific tags
     formatted_query = f"Respond to the following query using only the tags h1, h2, h3, h4, h5, h6, ul, ol, li, and p: {query_text}"
 
+    history = load_history(user_id, session_id)
+
+    flattened_messages = [msg for sublist in history[:10] for msg in sublist]
+    summary = load_session(user_id, session_id)["summary"]
+    # Prepare the messages for the OpenAI API call
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "system", "content": f"Here are some relevant documents:\n\n{doc_contents}"},
+        {"role": "user", "content": formatted_query},
+        {"role": "system", "content": "Here is a summary of the conversation: " + summary},
+        {"role": "system", "content": "Here is a recent conversation context:"}
+    ]
+
+    # Add user and assistant messages alternatingly
+    for msg in flattened_messages:
+        messages.append({"role": "user", "content": msg['humanReq']})
+        messages.append({"role": "assistant", "content": msg['aiRes']})
+    
     response = client.chat.completions.create(
         model="gpt-4",
-        messages=[{"role": "user", "content": formatted_query}]
+        messages=messages,
+        max_tokens=1500
     )
     answer = response.choices[0].message.content
     
@@ -301,11 +327,10 @@ async def ask_query(user_id: str, session_id: str, query: UserQuery):
     formatted_answer = f"<h1>Response</h1>{answer}"
 
     # Save to user-specific and session-specific history
-    history = load_history(user_id, session_id)
     from utils import aiChatName
     chatName = "oldChat"
-    if history == []:
-        chatName = aiChatName(query_text)
+    if history == [] or len(history) >= 5:
+        chatName = aiChatName(query_text, history, user_id, session_id)
     history.append([
             {
                 "humanReq": query_text,
@@ -315,7 +340,9 @@ async def ask_query(user_id: str, session_id: str, query: UserQuery):
         ]
     )
     save_history(user_id, session_id, history, chatName)
-
+    from utils import generate_summary_new_msg
+    latest_query = history[-1][0]
+    print(generate_summary_new_msg(latest_query, user_id=user_id, session_id=session_id))
     return {"answer": formatted_answer}
 
 @app.get("/chats/user/{user_id}")

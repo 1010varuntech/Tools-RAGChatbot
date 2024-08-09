@@ -92,16 +92,105 @@ from dotenv import load_dotenv
 load_dotenv()
 from openai import OpenAI
 
-def aiChatName(query):
+def aiChatName(query, history, user_id, session_id):
     openai_api_key = os.getenv("OPENAI_API_KEY")
     if openai_api_key is None:
         raise ValueError("No OPENAI_API_KEY found in environment variables")
     client = OpenAI(api_key=openai_api_key)
+    summary = db.sessions.find_one({"user_id": user_id, "session_id": session_id})["summary"]
+    if summary is None:
+        print("Generating summary as no summary found in the database for aiChatName")
+        summary = generateSummary(history)
+        saveSummary(user_id, session_id, summary)
+
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
-            {"role": "system", "content": "return a name for a chat according to the given question, it must be a chat name of 20 characters or less"},
-            {"role": "user", "content": query},
+            {"role": "system", "content": "return a descriptive name for a chat according to the given context, it must be a chat name of 20 characters or less"},
+            {"role": "system", "content": "context: "+summary},
+            {"role": "user", "content": "user's query"+query},
         ],
     )
     return ((response.choices[0].message.content).replace('"', "")).replace("\n", "")
+
+from dotenv import load_dotenv
+load_dotenv()
+from openai import OpenAI
+import os
+
+def generateSummary(messages):
+    try:
+        load_dotenv()
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if openai_api_key is None:
+            raise ValueError("No OPENAI_API_KEY found in environment variables")
+        client = OpenAI(api_key=openai_api_key)
+
+        # Initialize an empty list to hold all messages formatted correctly
+        formatted_msgs = [{"role": "system", "content": "generate a detailed summary of the conversation generate the summary as in you are going to use it for your own context:"}]
+        
+        # Flatten the nested list of messages
+        flattened_messages = [msg for sublist in messages for msg in sublist]
+
+        # Add user and assistant messages alternatingly
+        for msg in flattened_messages:
+            formatted_msgs.append({"role": "user", "content": msg['humanReq']})
+            formatted_msgs.append({"role": "assistant", "content": msg['aiRes']})
+
+        # Generate a summary using the OpenAI API
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=formatted_msgs,
+            max_tokens=1500
+        )
+        summary = response.choices[0].message.content
+        return summary
+    except Exception as e:
+        print(f"An error occurred while generating the summary: {e}")
+        return None
+
+def saveSummary(user_id, session_id, summary):
+    db.sessions.update_one(
+        {"user_id": user_id, "session_id": session_id},
+        {"$set": {"summary": summary}},
+        upsert=True
+    )
+
+def generate_summary_new_msg(messages, user_id, session_id):
+    try:
+        print(messages, "this is the messages")
+        load_dotenv()
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if openai_api_key is None:
+            raise ValueError("No OPENAI_API_KEY found in environment variables")
+        client = OpenAI(api_key=openai_api_key)
+        summary = db.sessions.find_one({"user_id": user_id, "session_id": session_id})["summary"]
+        
+        # Initialize an empty list to hold all messages formatted correctly
+        formatted_msgs = [{"role": "system", "content": "generate a detailed summary of the conversation generate the summary as in you are going to use it for your own context:"}]
+        
+        # Check if messages is a list of dictionaries
+        if isinstance(messages, list):
+            # Flatten the nested list of messages if necessary
+            flattened_messages = [msg for sublist in messages for msg in sublist] if isinstance(messages[0], list) else messages
+        else:
+            # If messages is a single dictionary, wrap it in a list
+            flattened_messages = [messages]
+
+        # Add user and assistant messages alternatingly
+        for msg in flattened_messages:
+            formatted_msgs.append({"role": "user", "content": msg['humanReq']})
+            formatted_msgs.append({"role": "assistant", "content": msg['aiRes']})
+
+        # Generate a summary using the OpenAI API
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=formatted_msgs,
+            max_tokens=1500
+        )
+        summary = response.choices[0].message.content
+        saveSummary(user_id, session_id, summary)
+        return summary
+    except Exception as e:
+        print(f"An error occurred while generating the summary: {e}")
+        return None
