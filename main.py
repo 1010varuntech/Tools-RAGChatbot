@@ -329,7 +329,7 @@ async def ask_query(user_id: str, session_id: str, query: UserQuery):
     # Save to user-specific and session-specific history
     from utils import aiChatName
     chatName = "oldChat"
-    if history == [] or len(history) >= 5:
+    if history == [] or len(history) == 5:
         chatName = aiChatName(query_text, history, user_id, session_id)
     history.append([
             {
