@@ -299,7 +299,9 @@ async def ask_query(user_id: str, session_id: str, query: UserQuery):
     history = load_history(user_id, session_id)
 
     flattened_messages = [msg for sublist in history[:10] for msg in sublist]
-    summary = load_session(user_id, session_id)["summary"]
+    session=load_session(user_id, session_id)
+    print("session", session)
+    summary = session.get("summary") or generateSummary(flattened_messages)
     # Prepare the messages for the OpenAI API call
     messages = [
         {"role": "system", "content": "You are a helpful assistant."},

@@ -93,11 +93,12 @@ load_dotenv()
 from openai import OpenAI
 
 def aiChatName(query, history, user_id, session_id):
+    print("aiChatName called")
     openai_api_key = os.getenv("OPENAI_API_KEY")
     if openai_api_key is None:
         raise ValueError("No OPENAI_API_KEY found in environment variables")
     client = OpenAI(api_key=openai_api_key)
-    summary = db.sessions.find_one({"user_id": user_id, "session_id": session_id})["summary"]
+    summary = load_session(user_id, session_id).get("summary") or None
     if summary is None:
         print("Generating summary as no summary found in the database for aiChatName")
         summary = generateSummary(history)
