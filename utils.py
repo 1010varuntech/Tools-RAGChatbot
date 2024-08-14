@@ -9,10 +9,11 @@ load_dotenv()
 
 # MongoDB configuration
 MONGODB_URI = os.getenv("MONGODB_URI")
-MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME").split('=')[-1]
-
+MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME")
+print("MONGODB_NAME", MONGODB_DB_NAME)
 client = MongoClient(MONGODB_URI)
 db = client[MONGODB_DB_NAME]
+print("Connected to MongoDB", db)
 
 # MongoDB operations for tools
 def save_tool(tool):
@@ -98,11 +99,7 @@ def aiChatName(query, history, user_id, session_id):
     if openai_api_key is None:
         raise ValueError("No OPENAI_API_KEY found in environment variables")
     client = OpenAI(api_key=openai_api_key)
-    summary = load_session(user_id, session_id).get("summary") or None
-    if summary is None:
-        print("Generating summary as no summary found in the database for aiChatName")
-        summary = generateSummary(history)
-        saveSummary(user_id, session_id, summary)
+    summary = load_session(user_id, session_id).get("summary") or "no context passed to generate chat name so chat name must be generated based on the query"
 
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
@@ -131,13 +128,11 @@ def generateSummary(messages):
         formatted_msgs = [{"role": "system", "content": "generate a detailed summary of the conversation generate the summary as in you are going to use it for your own context:"}]
         
         # Flatten the nested list of messages
-        flattened_messages = [msg for sublist in messages for msg in sublist]
-
+        flattened_messages = [msg for sublist in messages for msg in sublist] if isinstance(messages[0], list) else messages
         # Add user and assistant messages alternatingly
         for msg in flattened_messages:
             formatted_msgs.append({"role": "user", "content": msg['humanReq']})
             formatted_msgs.append({"role": "assistant", "content": msg['aiRes']})
-
         # Generate a summary using the OpenAI API
         response = client.chat.completions.create(
             model="gpt-4",
@@ -145,6 +140,7 @@ def generateSummary(messages):
             max_tokens=1500
         )
         summary = response.choices[0].message.content
+        print("summary in generateSummary", summary)
         return summary
     except Exception as e:
         print(f"An error occurred while generating the summary: {e}")
@@ -165,10 +161,10 @@ def generate_summary_new_msg(messages, user_id, session_id):
         if openai_api_key is None:
             raise ValueError("No OPENAI_API_KEY found in environment variables")
         client = OpenAI(api_key=openai_api_key)
-        summary = db.sessions.find_one({"user_id": user_id, "session_id": session_id})["summary"]
+        summary = db.sessions.find_one({"user_id": user_id, "session_id": session_id})["summary"] or "no context passed as summary so summary must be generated based on the messages"
         
         # Initialize an empty list to hold all messages formatted correctly
-        formatted_msgs = [{"role": "system", "content": "generate a detailed summary of the conversation generate the summary as in you are going to use it for your own context:"}]
+        formatted_msgs = [{"role": "system", "content": "generate a detailed summary of the conversation. Generate the summary as in you are going to use it for your own context:"}]
         
         # Check if messages is a list of dictionaries
         if isinstance(messages, list):

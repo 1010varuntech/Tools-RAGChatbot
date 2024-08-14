@@ -144,22 +144,21 @@ vectordb = None
 retriever = None
 qa_chain = None
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global vectordb, retriever, qa_chain
-    default_namespace = "default"  # Define a default namespace
-    try:
-        vectordb = await load_and_process_documents(default_namespace)
-        retriever = vectordb.as_retriever(search_kwargs={"k": 2})
-        qa_chain = RetrievalQA.from_chain_type(llm=turbo_llm, chain_type="stuff", retriever=retriever, return_source_documents=True)
-        yield
-    except httpx.HTTPStatusError as e:
-        print(f"Error during startup: {e.response.json()}")
-    except httpx.RequestError as e:
-        print(f"Request error during startup: {str(e)}")
+# @asynccontextmanager
+# async def lifespan(app: FastAPI):
+#     global vectordb, retriever, qa_chain
+#     default_namespace = "default"  # Define a default namespace
+#     try:
+#         vectordb = await load_and_process_documents(default_namespace)
+#         qa_chain = RetrievalQA.from_chain_type(llm=turbo_llm, chain_type="stuff", retriever=retriever, return_source_documents=True)
+#         yield
+#     except httpx.HTTPStatusError as e:
+#         print(f"Error during startup: {e.response.json()}")
+#     except httpx.RequestError as e:
+#         print(f"Request error during startup: {str(e)}")
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 
 # Defining Pydantic models
 class Query(BaseModel):
@@ -275,6 +274,11 @@ from utils import generateSummary
 
 @app.post("/query/{user_id}/{session_id}")
 async def ask_query(user_id: str, session_id: str, query: UserQuery):
+    # if query url includes linkedin, then url = www.linkedin.com and if it includes dripify, then url = www.dripify.io
+    if "linkedin" in query.url:
+        query.url = "www.linkedin.com"
+    elif "dripify" in query.url:
+        query.url = "www.dripify.io"
     namespace = query.url  # using URL as namespace
     existing_sessions = load_sessions(user_id)
     if not any(session["session_id"] == session_id for session in existing_sessions):
@@ -282,30 +286,35 @@ async def ask_query(user_id: str, session_id: str, query: UserQuery):
 
     source_choice = query.source_filter.lower()
     query_text = query.query
-
+    retriever = vectordb.as_retriever(search_kwargs={"k": 2})
     if source_choice != "all":
         retrieved_docs = retriever.get_relevant_documents(query_text, filters={"source": source_choice}, namespace=namespace)
     else:
         retrieved_docs = retriever.get_relevant_documents(query_text, namespace=namespace)
     
-    print("retrieved_docs", retrieved_docs)
     
     # Extract the content from retrieved_docs
     doc_contents = "\n\n".join([doc.page_content for doc in retrieved_docs])
+    print("doc_contents 1234 :: ", doc_contents)
     
     # Modify the query text to instruct the model to use specific tags
     formatted_query = f"Respond to the following query using only the tags h1, h2, h3, h4, h5, h6, ul, ol, li, and p: {query_text}"
 
     history = load_history(user_id, session_id)
-
+    print("history", history)
     flattened_messages = [msg for sublist in history[:10] for msg in sublist]
+    print("flattened_messages", flattened_messages)
     session=load_session(user_id, session_id)
-    print("session", session)
-    summary = session.get("summary") or generateSummary(flattened_messages)
+    summary = session.get("summary")
+    if (summary == None) and (flattened_messages):
+        summary = generateSummary(flattened_messages)
+        save_session(user_id, session_id, {"summary": summary}, new_session=False)
+    else:
+        summary = "no context passed to generate chat name so chat name must be generated based on the query"
     # Prepare the messages for the OpenAI API call
     messages = [
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "system", "content": f"Here are some relevant documents:\n\n{doc_contents}"},
+        {"role": "system", "content": "You are a helpful assistant, which has an understanding of the platform:"+query.url},
+        {"role": "system", "content": f"Here is the particular document user is referring to:\n\n{doc_contents}"},
         {"role": "user", "content": formatted_query},
         {"role": "system", "content": "Here is a summary of the conversation: " + summary},
         {"role": "system", "content": "Here is a recent conversation context:"}
