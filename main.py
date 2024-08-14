@@ -144,21 +144,22 @@ vectordb = None
 retriever = None
 qa_chain = None
 
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     global vectordb, retriever, qa_chain
-#     default_namespace = "default"  # Define a default namespace
-#     try:
-#         vectordb = await load_and_process_documents(default_namespace)
-#         qa_chain = RetrievalQA.from_chain_type(llm=turbo_llm, chain_type="stuff", retriever=retriever, return_source_documents=True)
-#         yield
-#     except httpx.HTTPStatusError as e:
-#         print(f"Error during startup: {e.response.json()}")
-#     except httpx.RequestError as e:
-#         print(f"Request error during startup: {str(e)}")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global vectordb, retriever, qa_chain
+    default_namespace = "default"  # Define a default namespace
+    try:
+        vectordb = await load_and_process_documents(default_namespace)
+        retriever = vectordb.as_retriever(search_kwargs={"k": 2})
+        qa_chain = RetrievalQA.from_chain_type(llm=turbo_llm, chain_type="stuff", retriever=retriever, return_source_documents=True)
+        yield
+    except httpx.HTTPStatusError as e:
+        print(f"Error during startup: {e.response.json()}")
+    except httpx.RequestError as e:
+        print(f"Request error during startup: {str(e)}")
 
 
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 # Defining Pydantic models
 class Query(BaseModel):
@@ -286,7 +287,7 @@ async def ask_query(user_id: str, session_id: str, query: UserQuery):
 
     source_choice = query.source_filter.lower()
     query_text = query.query
-    retriever = vectordb.as_retriever(search_kwargs={"k": 2})
+
     if source_choice != "all":
         retrieved_docs = retriever.get_relevant_documents(query_text, filters={"source": source_choice}, namespace=namespace)
     else:
